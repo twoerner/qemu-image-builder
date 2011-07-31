@@ -1,0 +1,287 @@
+The following is a set of notes of what I discovered trying to get this script
+to work correctly. This is a task I had wanted to do for a while, had played
+with on a number of occasions, and given up on once or twice (believing the
+task to be impossible).
+
+The raw documentation from the various tools often does not suffice. Often the
+only way to figure out how to do something is to find someone else who has
+already done the task (or something closely resembling the task) and look
+through their work to figure out how/why yours is off-base.
+
+
+DD Recursively
+^^^^^^^^^^^^^^
+   I had wanted this script to work on a range of machines. When I first
+   started trying it on various machine (which didn't have as much memory)
+   the first failure I noticed was that trying to 'dd' a large block would
+   run out of memory and fail. However it is often faster to perform a 'dd'
+   once with one large chunk of memory rather than many times with a smaller
+   chunk.
+
+   Therefore I wrote a routine to try first one allocation with the size of
+   disk the user wants to create. If that fails, halve the allocation but
+   double the count. Continue until success or the numbers become absurd.
+
+
+Qemu is Picky Regarding C/H/S
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   I wouldn't be able to define what "cylinders", "heads", and "sectors"
+   mean exactly, other than a rough notion, but I do know that Qemu is
+   very picky about what values are used for these parameters. I believe
+   they relate to how the data is stored on a disk; the same 2GB, for
+   example, could be laid out as "X number of chunks of size Y" or as
+   "(2 * X) of chunks of size (Y / 2)". These values are important to tools
+   and software which interact with disks at the lowest levels (from a
+   software point of view): fdisk, sfdisk, programs for formatting
+   partitions, and emulators running virtual disks.
+
+   Like Qemu's man(8) page states, Qemu only allows these parameters to take
+   on values in the following ranges:
+
+	1 <= C <= 16383
+	1 <= H <= 16
+	1 <= S <= 63
+
+   Without any guidance, I've noticed that "fdisk" will tend to start off
+   with a heads count of 255; clearly outside Qemu's allowed range. Therefore
+   one of the "tricks" to come from this exercise was the need to start off
+   with a calculation of the C/H/S value which will fit within Qemu's allowed
+   range which must be then specified with every subsequent low-level tool.
+
+   The other great discovery was that I don't have to figure out how to
+   perform any size to C/H/S calculations myself! If I use "fdisk"'s "-l"
+   option and specify one or two of these parameters on a file of the
+   appropriate size, "fisk" will calculate the other parameter(s) for me!
+
+	$ dd if=/dev/zero of=img bs=1k count=1000
+	1000+0 records in
+	1000+0 records out
+	1024000 bytes (1.0 MB) copied, 0.00337005 s, 304 MB/s
+
+   With no options "fdisk" uses 255 heads:
+
+	$ fdisk -l img
+
+	Disk img: 1 MB, 1024000 bytes
+	255 heads, 63 sectors/track, 0 cylinders, total 2000 sectors
+	Units = sectors of 1 * 512 = 512 bytes
+	Sector size (logical/physical): 512 bytes / 512 bytes
+	I/O size (minimum/optimal): 512 bytes / 512 bytes
+	Disk identifier: 0x00000000
+
+	Disk img doesn't contain a valid partition table
+
+   But specifying the heads to be 16 gives:
+
+	$ fdisk -H 16 -l img
+
+	Disk img: 1 MB, 1024000 bytes
+	16 heads, 63 sectors/track, 1 cylinders, total 2000 sectors
+	Units = sectors of 1 * 512 = 512 bytes
+	Sector size (logical/physical): 512 bytes / 512 bytes
+	I/O size (minimum/optimal): 512 bytes / 512 bytes
+	Disk identifier: 0x00000000
+
+	Disk img doesn't contain a valid partition table
+
+   So we now know that if we want to partition a disk of 1024000 bytes with
+   16 heads and 63 sectors, only 1 cylinder is required. And we figured this
+   out without knowing much about heads, sectors, or cylinders, but by knowing
+   we could get "fdisk" to do the calculation for us.
+
+   Of course other options on a disk of 1024000 bytes are possible too:
+
+	heads = 16, sectors = 10 -> cylinders = 12
+	heads = 16, sectors = 16 -> cylinders = 7
+	heads = 4,  sectors = 4  -> cylinders = 125
+	(etc...)
+
+
+Partition In Cylinders
+^^^^^^^^^^^^^^^^^^^^^^
+   The reason why this C/H/S calculation is important is because formatting
+   tools (fdisk and sfdisk) operate in terms of cylinders. For completeness'
+   sake I should point out that newer versions of these programs can be asked
+   to work in other units, but by default cylinders are used and older
+   versions don't understand anything but.
+
+   Therefore if we wanted to partition a disk 5 ways which only had 1 cylinder
+   we'd be in for quite a challenge. However, that same sized disk could be
+   divided such that there are 125 cylinders, making partitioning easier.
+
+
+Format In Blocks
+^^^^^^^^^^^^^^^^
+   While partitioning may occur in units of cylinders, formatting a partition
+   requires a size specified in blocks.
+
+   This was a huge stumbling block for me and nearly brought this work to a
+   complete stop. In all the years I've been using Linux and partitioning
+   + formatting disks I have never needed to specify a block count, and to
+   be honest I'm not sure how/why this suddenly became such a huge issue
+   that ended up derailing me for so long. In fact I wasn't even aware the
+   partitioning tools accepted an option block count on their command lines.
+
+   By not initially specifying the block counts I would end up with kernel
+   messages, during boot, saying:
+
+	attempt to access beyond end of device
+	hdd1: rw=32, want=3670040, limit=2677247
+	EXT3-fs error (device hdd1): ext3_get_inode_loc: unable to read inode block - inode=109537, block=458754
+
+   and:
+
+	attempt to access beyond end of device
+	hdd1: rw=32, want=2850824, limit=2677247
+	EXT3-fs error (device hdd1): ext3_find_entry: reading directory #78241 offset 0
+
+   Sometimes such boots would make it to a prompt (in which case everything
+   was messed up and the system wasn't really usable) or, more likely, the
+   kernel would just panic and stop.
+
+   Once again: "fdisk -l" to the rescue! Why even bother trying to figure out
+   what a 'block' is or even start on the daunting task of trying to calculate
+   all your block sizes when "fdisk -l" will happily show them to you anyway?!
+
+   For example:
+
+	$ fdisk -l /dev/loop0
+
+	Disk /dev/loop0: 3970 cylinders, 16 heads, 63 sectors/track
+
+	sfdisk: ERROR: sector 0 does not have an msdos signature
+	 /dev/loop0: unrecognized partition table type
+	Old situation:
+	No partitions found
+	New situation:
+	Units = cylinders of 516096 bytes, blocks of 1024 bytes, counting from 0
+
+	Device Boot        Start    End    #cyls    #blocks  Id  System
+	/dev/loop0p1          0+   2655    2656-   1338623+  83  Linux
+	/dev/loop0p2       2656    2695      40      20160   83  Linux
+	/dev/loop0p3       2696    2735      40      20160   83  Linux
+	/dev/loop0p4       2736    3969    1234     621936    5  Extended
+	/dev/loop0p5       2736+   2927     192-     96767+  83  Linux
+	/dev/loop0p6       2928+   3663     736-    370943+  83  Linux
+	/dev/loop0p7       3664+   3703      40-     20159+  83  Linux
+	/dev/loop0p8       3704+   3743      40-     20159+  83  Linux
+	/dev/loop0p9       3744+   3969     226-    113903+  83  Linux
+
+   As you can probably guess, this really only comes into play when you have
+   many partitions; working with a disk image with only one partition doesn't
+   (easily) demonstrate this problem.
+
+
+Then And Now
+^^^^^^^^^^^^
+   One of the goals of my project was to get something to work on my latest
+   machine, but I was also hoping that it could work on a much older Linux
+   installation.
+
+   Over time the tool (of course) evolve. Working with the latest tools was
+   easy and convenient. Going back and trying to get everything to work with
+   the older tools was a bit harder.
+
+ losetup
+ -------
+   Using an older version of "losetup" isn't as nice as the latest versions.
+   Previously you would have to ask "losetup" for the next free device, then
+   invoke "losetup" again to use it. Obviously between the asking and the
+   using something else could come along and take it. Thankfully this has been
+   re-written so in one call you can ask "losetup" to find the next available
+   loop device, use it, and tell you which device it found and is using.
+
+ fdisk
+ -----
+   The latest version of "fdisk", by default, reports in blocks. But the
+   default on older tools appears to have been cylinders. When you need
+   "fdisk" to perform calculations for you in blocks you need to specify
+   the "-u" option. Specifying the "-u" option on the latest "fdisk" does not
+   do any harm, so simply always provide this option and blocks will be
+   reported by both the old and new tools.
+
+ formatting a file
+ -----------------
+   With newer versions of "fdisk" and "sfdisk" you can simply point it at a
+   file and they can do their work:
+
+	$ dd if=/dev/zero of=img bs=1K count=1024
+	1024+0 records in
+	1024+0 records out
+	1048576 bytes (1.0 MB) copied, 0.00679936 s, 154 MB/s
+	$ fdisk -l img
+
+	Disk img: 1 MB, 1048576 bytes
+	255 heads, 63 sectors/track, 0 cylinders, total 2048 sectors
+	Units = sectors of 1 * 512 = 512 bytes
+	Sector size (logical/physical): 512 bytes / 512 bytes
+	I/O size (minimum/optimal): 512 bytes / 512 bytes
+	Disk identifier: 0x00000000
+
+	Disk img doesn't contain a valid partition table
+
+   Older versions of "fdisk" and "sfdisk" would complain that the object is
+   not a block device and exit with failure.
+
+
+Bootloaders
+^^^^^^^^^^^
+   Getting the bootloaders to work was another of the more daunting tasks, one
+   that almost stopped this project for good. There is always, of course, the
+   concern that instead of modifying the MBR and boot sequence of your virtual
+   disk that you end up accidentally modifying the boot of your development
+   machine! The solutions I have found only modify the virtual machine, and
+   leave the development machine alone.
+
+   One of the key tricks to getting this to work with either of "lilo" or
+   "extlinux" was that both the root disk itself and the partition holding the
+   kernel must be available as devices and the partition holding the kernel
+   had to be mounted for this procedure to work. In retrospect that is quite
+   obvious, but at the time I was working this out it took some trial and
+   error. Both "lilo" and "extlinux" need to modify the MBR, so having the raw
+   disk with no offsets available is obviously required. But what is less
+   obvious is that they need to know where the kernel is located (from a
+   C/H/S point of view) since they write those values into the MBR so it
+   knows from where it needs to load the kernel. They can only perform these
+   calculation accurately if that partition is mounted. Of course I didn't
+   write either of the "lilo" or "extlinux" tools so maybe my explanation is
+   incorrect. Or maybe they also need them mounted because they need to place
+   the second-stage loader somewhere other than the MBR. In any case, the
+   partition holding the kernel needed to be mounted and both the raw disk
+   and the device holding the partition with the kernel needed to be
+   available (via "losetup").
+
+   One of the challenges with "lilo" was figuring out how to create a valid
+   configuration file. There was just no way one could even guess at the
+   contortions required to get "lilo" to prepare a loop device for booting.
+   The magic for this is found in the man page for lilo.conf(5). Since it is
+   not known which loop devices the script maybe using, it simply isn't
+   possible to create a complete lilo.conf file ahead of time; so this config
+   file must be generated by the script. However, the script can't possibly
+   know what labels you want, how many, or how to define them for you, so
+   the user must provide this in some way. What I worked out was: the script
+   will generate the top part of the lilo.conf file and the user will supply
+   the bottom part. The script then joins them together. Of course in order
+   to create the bottom half correctly you have to know what the top half is
+   doing. You simply need to know the script will mount the partition
+   containing the Linux kernel on a directory named "part1". See the included
+   example in the "conf" directory for details.
+
+   The big show-stopped with "extlinux" is that the partition containing the
+   MBR must have the bootable flag enabled. Without this flag "extlinux"'s
+   MBR doesn't know which partition from which to boot. This is not a
+   requirement for "lilo".
+
+   Eventually I'm hoping to get around to trying out "grub". I wonder if, by
+   using it, I can do away with having to mount the partition containing the
+   Linux kernel. Also, since Qemu can run virtual machines of different
+   architectures, I'd like this script to be able to build disks for non
+   x86 machines. This would require using different boot configurations.
+
+
+Conclusion
+^^^^^^^^^^
+   I think these are all the tricks I needed to get this script working. I
+   hope the examples work for you, and I hope that if you stumbled upon this
+   tool looking for help with your own that you found that for which you went
+   looking!

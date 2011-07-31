@@ -1,0 +1,143 @@
+GOAL:
+^^^^^
+   To create one file which qemu can use as a disk to boot a virtual machine
+   running Linux.
+
+
+OVERVIEW:
+^^^^^^^^^
+   1) create a directory anywhere where you have write access
+   2) assemble a Linux filesystem at that location; including the files a Linux
+      system typically needs and uses
+   3) run the script to create the hard-drive image
+   4) use qemu to boot the hard-drive image
+
+
+LOCATIONS, DEFINITIONS:
+^^^^^^^^^^^^^^^^^^^^^^^
+   Throughout this document there are a number of locations to which I will
+   refer for which the absolute location is irrelevant. You are free to choose
+   any location you want. So to help keep track of which location to which I'm
+   referring, I will indicate each of the locations in the rest of this
+   document by the following bash variable names:
+
+   $BASE     - the directory in which the Linux filesystem is being assembled;
+               sometimes this is referred to as the "staging" area
+   $BUILD    - the directory where various software pieces will be unpacked
+   $PROJECT  - the directory into which this project has been unpacked
+   $DOWNLOAD - the directory into which files downloaded from the internet
+               are placed
+
+
+CAVEATS:
+^^^^^^^^
+   So far the script only supports building a VM for an x86-based machine.
+   Eventually I'd like to see it support other architectures, but for now
+   this is what I have.
+
+   In this tutorial I indicate the specific versions of components I have used.
+   You are free, of course, to use whatever versions you would like, but if
+   you would like to try using a know-to-work set of versions on your first
+   try it might be best to start with these versions then tweak as you want.
+
+   Notice that any steps that can be run as a regular user are prefixed with
+   a '$' PS1, any which need to be run as root have a PS1 of '#'.
+
+STEPS:
+^^^^^^
+1) Linux Kernel
+
+   The first thing the filesystem will need (since it is the second thing to
+   be run by a booting system) is the Linux kernel. In this example I have used
+   2.6.39.3. Goto kernel.org, retrieve that version of the Linux kernel, and
+   unpack it in $BUILD (creating the directory $BUILD/linux-2.6.39.3):
+
+	$ cd $BUILD
+	$ bzip2 -d < $DOWNLOAD/linux-2.6.39.3.tar.bz2 | tar xfv -
+	$ cd linux-2.6.39.3
+
+   You can configure the kernel any way you wish, but I have provided a very
+   basic, simple configuration which will work well enough for this tutorial:
+
+	$ cp $PROJECT/conf/linux-2.6.39.3 .config
+	$ make bzImage
+
+   NOTE that you may have to answer some additional configuration questions.
+
+   Copy the completed kernel to the staging area:
+
+	$ mkdir -p $BASE/boot
+	$ cp arch/x86/boot/bzImage $BASE/boot
+
+
+2) Linux Userspace -- Busybox
+
+   There are many available options, but the fastest and easiest for our
+   purposes is to use Busybox. In my testing I used version 1.18.5:
+
+	$ cd $BUILD
+	$ bzip2 -d < $DOWNLOAD/busybox-1.18.5.tar.bz2 | tar xfv -
+	$ cd busybox-1.18.5
+	$ cp $PROJECT/conf/busybox-1.18.5 .config
+	$ make
+	$ make CONFIG_PREFIX=$BASE install
+
+
+3) Linux Userspace -- Extras
+
+   The $BASE directory is almost complete, but in order to finish the
+   filesystem a few more things are needed:
+
+	$ cd $BASE
+	$ mkdir -p dev etc/init.d proc sys
+	$ cp $BUILD/busybox-1.18.5/examples/inittab etc
+	$ cat > etc/init.d/rcS << EOF
+	#!/bin/sh
+	mount -t sysfs sysfs /sys
+	mount -t proc proc /proc
+	ifconfig lo 127.0.0.1
+	ifconfig eth0 192.168.0.50
+	EOF
+	$ chmod +x etc/init.d/rcS
+
+   Edit 'etc/inittab' and remove (or comment out) any lines which have the
+   string "getty" in them.
+
+
+4) Build HDD Image
+
+   Now we invoke this project's script to create the hard-drive image for
+   qemu. The script will install a bootloader and for this step we have a
+   choice: lilo or extlinux. If you wish to use lilo:
+
+	# $PROJECT/mkqemuimg.sh \
+		--lilo $BUILD/conf/lilo.tmpl \
+		8388608 disk.HDD $BASE
+
+   If you wish to use extlinux you need to first find out to location to which
+   it has been installed. There are two files from the installation of
+   extlinux which we will need for this step: 'mbr.bin' and 'menu.c32'.
+   Assuming they are both located in the directory $EXTLINUX we can then
+   build the extlinux version of the disk image by invoking:
+
+	# $PROJECT/mkqemuimg.sh \
+		--extlinux $EXTLINUX/menu.c32,$EXTLINUX/mbr.bin,$PROJECT/conf/extlinux.conf \
+		8388608 disk.HDD $BASE
+
+   As the script builds the image it will report the steps it is taking. When
+   the build is complete (successful or not) it will generate a file named
+   'LOG' which you can inspect for a more verbose version of what when on
+   during the build.
+
+
+5) Run with Qemu
+
+   Assuming a successful build took place you can now run the virtual machine
+   with qemu using:
+
+	# qemu-system-x86_64 \
+		-m 512 \
+		-drive file=disk.HDD \
+		-net nic,model=virtio \
+		-net tap,script=conf/qemu-ifup.nonroutable,downscript=no \
+		-no-reboot

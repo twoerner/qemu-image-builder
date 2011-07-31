@@ -1,0 +1,5 @@
+This project contains a script which makes it easy
+to create a file which contains a disk image which
+qemu can boot.
+
+July 28, 2011

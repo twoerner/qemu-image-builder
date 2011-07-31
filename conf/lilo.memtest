@@ -1,0 +1,2 @@
+image=part1/boot/memtest.bin
+	label="memtest86+ 4.20"
