@@ -787,6 +787,25 @@ for ((CNT=0; CNT<$PARTITION_CNT; ++CNT)); do
 			PROCESSED=1
 		fi
 
+		# bzip2, gzip, tar, and xz
+		echo $TYPE | grep bzip2 > /dev/null 2>&1
+		BZIP2=$?
+		echo $TYPE | grep gzip > /dev/null 2>&1
+		GZIP=$?
+		echo $TYPE | grep "tar archive" > /dev/null 2>&1
+		TAR=$?
+		echo $TYPE | grep "xz compressed" > /dev/null 2>&1
+		XZ=$?
+		if [ $BZIP2 -eq 0 -o $GZIP -eq 0 -o $TAR -eq 0 -o $XZ -eq 0 ]; then
+			say "  -> tarball ($TYPE)"
+			tar xvaf ${DATA[$CNT]} -C partition/
+			if [ $? -ne 0 ]; then
+				say "   -> uncompress error"
+				exit 1
+			fi
+			PROCESSED=1
+		fi
+
 		# otherwise
 		if [ $PROCESSED -eq 0 ]; then
 			say "  -> other ($TYPE)"
