@@ -381,15 +381,19 @@ umount_pop() {
 }
 
 get_format_options() {
-	if [ -n "$1" ]; then
+	if [ -n "$*" ]; then
 		FORMATS=("$@")
 	fi
 }
 
 get_data_options() {
-	if [ -n "$1" ]; then
+	if [ -n "$*" ]; then
 		DATA=("$@")
 	fi
+}
+
+trim() {
+	echo $1
 }
 
 if [ $UID -ne 0 ]; then
@@ -749,8 +753,8 @@ for ((CNT=0; CNT<$PARTITION_CNT; ++CNT)); do
 	mount_push $LOOPDEV partition
 
 	# data
-	if [ -n "${DATA[$CNT]}" ]; then
-		say " -> processing data: ${DATA[$CNT]}"
+	if [ -n "$(trim ${DATA[$CNT]})" ]; then
+		say " -> processing data: '${DATA[$CNT]}'"
 		PROCESSED=0
 		TYPE=`file -b ${DATA[$CNT]}`
 
