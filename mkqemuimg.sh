@@ -754,6 +754,13 @@ for ((CNT=0; CNT<$PARTITION_CNT; ++CNT)); do
 		PROCESSED=0
 		TYPE=`file -b ${DATA[$CNT]}`
 
+		# check for symbolic links
+		echo $TYPE | grep "symbolic link" > /dev/null 2>&1
+		if [ $? -eq 0 ]; then
+			DATA[$CNT]=`readlink -f ${DATA[$CNT]}`
+			TYPE=`file -b ${DATA[$CNT]}`
+		fi
+
 		# fs image
 		echo $TYPE | grep filesystem > /dev/null 2>&1
 		if [ $? -eq 0 ]; then
