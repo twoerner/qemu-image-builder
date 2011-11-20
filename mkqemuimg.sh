@@ -73,7 +73,7 @@ say() {
 }
 
 usage() {
-	say "usage: $0 [OPTIONS] [BOOTLOADER] <size> <out> <data>"
+	say "usage: $0 [OPTIONS] <size> <out> <data>"
 	say "  <size>:"
 	say "    Specify the size of the disk in bytes"
 	say "  <out>:"
@@ -89,8 +89,6 @@ usage() {
 	say "                  Format all partitions (for which no format instructions have"
 	say "                  been specified with the --format option) with this command"
 	say "                  (default: $DEFAULTFMT)"
-	say ""
-	say "  bootloader, must specify one of:"
 	say "    --lilo <conf> Use lilo and specify the partial config file"
 	say "    --extlinux <menu>,<mbr>,<conf>"
 	say "                  Use extlinux and specify location of <menu>, <mbr>, and <config> files"
@@ -527,13 +525,6 @@ for data in ${DATA[*]}; do
 	fi
 done
 
-# make sure one of --lilo or --extlinux has been specified
-say " -> checking for bootloader"
-if [ $LILO -eq 0 -a $EXTLINUX -eq 0 ]; then
-	say " -> one of --lilo or --extlinux must be specified, a bootloader is required"
-	exit 1
-fi
-
 # make sure partition count, data items, and format count make sense
 say " -> verifying partition, data, and format counts"
 PARTITION_ARR=($PARTITION_SIZES)
@@ -807,72 +798,84 @@ done
 #####################################
 # bootloader
 say -b "installing bootloader"
-PART=0
-OFFSET=`expr 512 \* ${OFFSETS[$PART]}`
-echo " -> offset: $OFFSET"
-echo " -> blocks: ${BLOCKSZ[$PART]}"
-echo " -> format: ${FORMATS[$PART]}"
-attach_loop $VMIMG
-LOOPDEVP0=$LOOPDEV
-attach_loop -o $OFFSET $VMIMG
-LOOPDEVP1=$LOOPDEV
-mount_push ${LOOPDEVP1} part1
+if [ $LILO -ne 0 -o $EXTLINUX -ne 0 ]; then
+	PART=0
+	OFFSET=`expr 512 \* ${OFFSETS[$PART]}`
+	echo " -> offset: $OFFSET"
+	echo " -> blocks: ${BLOCKSZ[$PART]}"
+	echo " -> format: ${FORMATS[$PART]}"
+	attach_loop $VMIMG
+	LOOPDEVP0=$LOOPDEV
+	attach_loop -o $OFFSET $VMIMG
+	LOOPDEVP1=$LOOPDEV
+	mount_push ${LOOPDEVP1} part1
 
-if [ $LILO -eq 1 ]; then
-	say " -> lilo"
-	rm -f lilo.TMP
-	echo "disk=$LOOPDEVP0" >> lilo.TMP
-	echo -e "\tbios=0x80" >> lilo.TMP
-	echo -e "\tcylinders=$CYL" >> lilo.TMP
-	echo -e "\theads=$HDS" >> lilo.TMP
-	echo -e "\tsectors=$SEC" >> lilo.TMP
-	echo -e "\tpartition=$LOOPDEVP1" >> lilo.TMP
-	echo -e "\t\tstart=${OFFSETS[0]}" >> lilo.TMP
-	echo "" >> lilo.TMP
-	echo "lba32" >> lilo.TMP
-	echo "boot=$LOOPDEVP0" >> lilo.TMP
-	echo -e "prompt\ntimeout=200\nmap=part1/boot/map\ninstall=part1/boot/boot.b" >> lilo.TMP
-	echo "" >> lilo.TMP
-	cat $LILO_CONF >> lilo.TMP
-	echo "-------------------"
-	echo "lilo config file:"
-	cat lilo.TMP
-	echo "-------------------"
-	lilo -v3 -C lilo.TMP
-	RET=$?
-	rm -f lilo.TMP
-	if [ $RET -ne 0 ]; then
-		say "   -> lilo error"
-		exit 1
+	if [ $LILO -eq 1 ]; then
+		say " -> lilo"
+		rm -f lilo.TMP
+		echo "disk=$LOOPDEVP0" >> lilo.TMP
+		echo -e "\tbios=0x80" >> lilo.TMP
+		echo -e "\tcylinders=$CYL" >> lilo.TMP
+		echo -e "\theads=$HDS" >> lilo.TMP
+		echo -e "\tsectors=$SEC" >> lilo.TMP
+		echo -e "\tpartition=$LOOPDEVP1" >> lilo.TMP
+		echo -e "\t\tstart=${OFFSETS[0]}" >> lilo.TMP
+		echo "" >> lilo.TMP
+		echo "lba32" >> lilo.TMP
+		echo "boot=$LOOPDEVP0" >> lilo.TMP
+		echo -e "prompt\ntimeout=200\nmap=part1/boot/map\ninstall=part1/boot/boot.b" >> lilo.TMP
+		echo "" >> lilo.TMP
+		cat $LILO_CONF >> lilo.TMP
+		echo "-------------------"
+		echo "lilo config file:"
+		cat lilo.TMP
+		echo "-------------------"
+		lilo -v3 -C lilo.TMP
+		RET=$?
+		rm -f lilo.TMP
+		if [ $RET -ne 0 ]; then
+			say "   -> lilo error"
+			exit 1
+		fi
 	fi
-fi
 
-if [ $EXTLINUX -eq 1 ]; then
-	say " -> extlinux"
-	sfdisk $GEOM -A1 $LOOPDEVP0
+	if [ $EXTLINUX -eq 1 ]; then
+		say " -> extlinux"
+		sfdisk $GEOM -A1 $LOOPDEVP0
+		if [ $? -ne 0 ]; then
+			say "  -> can't setup bootable partition"
+			exit 1
+		fi
+		dd if="$EXTLINUX_MBR" of=$LOOPDEVP0
+		if [ $? -ne 0 ]; then
+			say "  -> failed to setup MBR ($EXTLINUX_MBR) of $LOOPDEVP0"
+			exit 1
+		fi
+		cp "$EXTLINUX_MENU" "$EXTLINUX_CONF" part1/boot
+		if [ $? -ne 0 ]; then
+			say "  -> copy error"
+			exit 1
+		fi
+		sync
+		extlinux -H $HDS -S $SEC --install part1/boot
+		if [ $? -ne 0 ]; then
+			say "  -> extlinux failure"
+			exit 1
+		fi
+		sync
+	fi
+
+	umount_pop # part1
+	detach_loop $LOOPDEVP1
+	detach_loop $LOOPDEVP0
+else
+	# just set first partition bootable
+	say " -> no bootloader specified, setting boot flag on first partition"
+	attach_loop $VMIMG
+	sfdisk $GEOM -A1 $LOOPDEV
 	if [ $? -ne 0 ]; then
 		say "  -> can't setup bootable partition"
 		exit 1
 	fi
-	dd if="$EXTLINUX_MBR" of=$LOOPDEVP0
-	if [ $? -ne 0 ]; then
-		say "  -> failed to setup MBR ($EXTLINUX_MBR) of $LOOPDEVP0"
-		exit 1
-	fi
-	cp "$EXTLINUX_MENU" "$EXTLINUX_CONF" part1/boot
-	if [ $? -ne 0 ]; then
-		say "  -> copy error"
-		exit 1
-	fi
-	sync
-	extlinux -H $HDS -S $SEC --install part1/boot
-	if [ $? -ne 0 ]; then
-		say "  -> extlinux failure"
-		exit 1
-	fi
-	sync
+	detach_loop $LOOPDEV
 fi
-
-umount_pop # part1
-detach_loop $LOOPDEVP1
-detach_loop $LOOPDEVP0
