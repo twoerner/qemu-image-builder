@@ -89,6 +89,7 @@ usage() {
 	say "                  Format all partitions (for which no format instructions have"
 	say "                  been specified with the --format option) with this command"
 	say "                  (default: $DEFAULTFMT)"
+	say "    --ids         Specify, as one argument, the set of partition IDs, default=83"
 	say "    --lilo <conf> Use lilo and specify the partial config file"
 	say "    --extlinux <menu>,<mbr>,<conf>"
 	say "                  Use extlinux and specify location of <menu>, <mbr>, and <config> files"
@@ -276,6 +277,7 @@ generate_sfdisk_str() {
 	local _cnt=$#
 	declare -i _part
 	local _part
+	local _id
 
 	_i=0
 	for _part in $*; do
@@ -291,6 +293,7 @@ generate_sfdisk_str() {
 	fi
 
 	for ((_i=0; _i<$_cnt; ++_i)); do
+		_id=$(trim ${PARTITION_IDS[$_i]})
 		if [ $_cnt -gt 3 -a $_i -eq 3 ]; then
 			_rtnstr="${_rtnstr},,E\n"
 		fi
@@ -299,7 +302,7 @@ generate_sfdisk_str() {
 			echo "invalid calculated number of cylinders ($_part) for partition $((_i+1))"
 			return 2
 		fi
-		_rtnstr="${_rtnstr},${_part}\n"
+		_rtnstr="${_rtnstr},${_part},${_id}\n"
 	done
 	_rtnstr="${_rtnstr},"
 	echo $_rtnstr
@@ -392,6 +395,12 @@ get_data_options() {
 	fi
 }
 
+get_partitions_ids() {
+	if [ -n "$*" ]; then
+		PARTITION_IDS=("$@")
+	fi
+}
+
 trim() {
 	echo $1
 }
@@ -406,7 +415,7 @@ trap cleanup EXIT
 
 #####################################
 say -b "processing cmdline"
-CMDLINE=`getopt -o "h" --long help,partitions:,format:,lilo:,extlinux:,default-format: -n $0 -- "$@"`
+CMDLINE=`getopt -o "h" --long help,partitions:,format:,lilo:,extlinux:,default-format:,ids: -n $0 -- "$@"`
 if [ $? -ne 0 ]; then
 	say " -> invocation error (invalid/incorrect cmdline)"
 	usage
@@ -432,6 +441,13 @@ while true; do
 			;;
 		--default-format)
 			DEFAULTFMT="$2"
+			shift
+			;;
+		--ids)
+			OLDIFS="$IFS"
+			IFS=","
+			get_partitions_ids $2
+			IFS="$OLDIFS"
 			shift
 			;;
 		--lilo)
