@@ -727,9 +727,9 @@ for ((CNT=0; CNT<$PARTITION_CNT; ++CNT)); do
 	say -b "processing partition $((CNT+1))"
 	OFFSET=`expr 512 \* ${OFFSETS[$CNT]}`
 	echo " -> offset: $OFFSET"
-	echo " -> blocks: ${BLOCKSZ[$PART]}"
-	echo " -> format: ${FORMATS[$PART]}"
-	echo " ->   data: ${DATA[$PART]}"
+	echo " -> blocks: ${BLOCKSZ[$CNT]}"
+	echo " -> format: ${FORMATS[$CNT]}"
+	echo " ->   data: ${DATA[$CNT]}"
 
 	attach_loop -o $OFFSET $VMIMG
 
