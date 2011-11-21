@@ -21,6 +21,7 @@ DEFAULTFMT="mke2fs"
 
 LILO=0
 EXTLINUX=0
+BOOTARM=0
 
 say() {
 	local _nopt=""
@@ -97,6 +98,9 @@ usage() {
 	say "    --lilo <conf> Use lilo and specify the partial config file"
 	say "    --extlinux <menu>,<mbr>,<conf>"
 	say "                  Use extlinux and specify location of <menu>, <mbr>, and <config> files"
+	say "    --bootarm <mlo>,<uboot>,<uImage>"
+	say "                  Prepare partition 1 for booting on an ARM platform"
+	say "                  using the given components"
 }
 
 cleanup() {
@@ -405,6 +409,12 @@ get_partitions_ids() {
 	fi
 }
 
+get_bootarm_parts() {
+	if [ -n "$*" ]; then
+		BOOTARM_PARTS=("$@")
+	fi
+}
+
 trim() {
 	echo $1
 }
@@ -419,7 +429,7 @@ trap cleanup EXIT
 
 #####################################
 say -b "processing cmdline"
-CMDLINE=`getopt -o "h" --long help,partpercents:,format:,lilo:,extlinux:,default-format:,ids: -n $0 -- "$@"`
+CMDLINE=`getopt -o "h" --long help,partpercents:,format:,lilo:,extlinux:,default-format:,ids:,bootarm: -n $0 -- "$@"`
 if [ $? -ne 0 ]; then
 	say " -> invocation error (invalid/incorrect cmdline)"
 	usage
@@ -502,6 +512,14 @@ while true; do
 			echo "  conf: '$EXTLINUX_CONF'"
 			shift
 			;;
+		--bootarm)
+			BOOTARM=1
+			OLDIFS="$IFS"
+			IFS=","
+			get_bootarm_parts $2
+			IFS="$OLDIFS"
+			shift
+			;;
 		--)
 			break
 			;;
@@ -564,6 +582,21 @@ fi
 if [ ${#FORMATS[*]} -gt $PARTITION_CNT ]; then
 	say " -> number of format specifiers (${#FORMATS[*]}) exceeds partition count ($PARTITION_CNT)"
 	exit 1
+fi
+
+# if --bootarm has been given, it implies:
+# - there are at least 2 partitions
+# - partition type for partition 1 is "0x0c: W95 FAT32 (LBA)"
+# - format for partition 1 is "mkfs.vfat -F 32 -n boot"
+if [ $BOOTARM -eq 1 ]; then
+	if [ $PARTITION_CNT -eq 1 ]; then
+		say " -> --bootarm requires at least 2 partitions"
+		say "    please specify --partpercents option"
+		exit 1
+	fi
+
+	PARTITION_IDS[0]="c"
+	FORMATS[0]="mkfs.vfat -F 32 -n boot"
 fi
 
 #####################################
@@ -758,10 +791,11 @@ for ((CNT=0; CNT<$PARTITION_CNT; ++CNT)); do
 	attach_loop -o $OFFSET $VMIMG
 
 	# format
-	say " -> formatting"
-	if [ -n "${FORMATS[$CNT]}" ]; then
+	if [ -n "$(trim ${FORMATS[$CNT]})" ]; then
+		say " -> formatting (${FORMATS[$CNT]})"
 		${FORMATS[$CNT]} ${LOOPDEV} ${BLOCKSZ[$CNT]} > /dev/null 2>&1
 	else
+		say " -> formatting (default: $DEFAULTFMT)"
 		$DEFAULTFMT ${LOOPDEV} ${BLOCKSZ[$CNT]} > /dev/null 2>&1
 	fi
 	if [ $? -ne 0 ]; then
@@ -769,6 +803,15 @@ for ((CNT=0; CNT<$PARTITION_CNT; ++CNT)); do
 		exit 1
 	fi
 	sync
+
+	# we're done with partition 1 if --bootarm is specified
+	if [ $CNT -eq 0 -a $BOOTARM -eq 1 ]; then
+		if [ -n "$(trim ${DATA[$CNT]})" ]; then
+			say " -> ignoring partition 1 data when --bootarm is given"
+		fi
+		detach_loop $LOOPDEV
+		continue
+	fi
 
 	mount_push $LOOPDEV partition
 
@@ -847,8 +890,9 @@ done
 
 #####################################
 # bootloader
-say -b "installing bootloader"
-if [ $LILO -ne 0 -o $EXTLINUX -ne 0 ]; then
+if [ $LILO -ne 0 -o $EXTLINUX -ne 0 -o $BOOTARM -ne 0 ]; then
+	say -b "installing bootloader"
+
 	PART=0
 	OFFSET=`expr 512 \* ${OFFSETS[$PART]}`
 	echo " -> offset: $OFFSET"
@@ -915,17 +959,46 @@ if [ $LILO -ne 0 -o $EXTLINUX -ne 0 ]; then
 		sync
 	fi
 
+	if [ $BOOTARM -eq 1 ]; then
+		say " -> booting ARM specified"
+
+		if [ ! -e ${BOOTARM_PARTS[0]} ]; then
+			say "  -> can't find MLO"
+			exit 1
+		fi
+		if [ ! -e ${BOOTARM_PARTS[1]} ]; then
+			say "  -> can't find u-boot"
+			exit 1
+		fi
+		if [ ! -e ${BOOTARM_PARTS[2]} ]; then
+			say "  -> can't find uImage"
+			exit 1
+		fi
+
+		sfdisk $GEOM -A1 $LOOPDEVP0
+		if [ $? -ne 0 ]; then
+			say "  -> can't setup bootable partition"
+			exit 1
+		fi
+
+		cp -v `readlink -f ${BOOTARM_PARTS[0]}` part1/MLO
+		if [ $? -ne 0 ]; then
+			say "  -> MLO copy error"
+			exit 1
+		fi
+		cp -v `readlink -f ${BOOTARM_PARTS[1]}` part1/u-boot.bin
+		if [ $? -ne 0 ]; then
+			say "  -> u-boot copy error"
+			exit 1
+		fi
+		cp -v `readlink -f ${BOOTARM_PARTS[2]}` part1/uImage
+		if [ $? -ne 0 ]; then
+			say "  -> uImage copy error"
+			exit 1
+		fi
+	fi
+
 	umount_pop # part1
 	detach_loop $LOOPDEVP1
 	detach_loop $LOOPDEVP0
-else
-	# just set first partition bootable
-	say " -> no bootloader specified, setting boot flag on first partition"
-	attach_loop $VMIMG
-	sfdisk $GEOM -A1 $LOOPDEV
-	if [ $? -ne 0 ]; then
-		say "  -> can't setup bootable partition"
-		exit 1
-	fi
-	detach_loop $LOOPDEV
 fi
