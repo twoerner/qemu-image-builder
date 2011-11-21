@@ -83,7 +83,8 @@ usage() {
 	say ""
 	say "  options:"
 	say "    --help|-h     Provide help information and exit successfully"
-	say "    --partitions  Specify -- as one, space-separated argument -- the set"
+	say "    --partpercents"
+	say "                  Specify -- as one, space-separated argument -- the set"
 	say "                  of partition size percentages"
 	say "    --format      Specify -- as one, comma-separated argument -- how to"
 	say "                  format each partition"
@@ -418,7 +419,7 @@ trap cleanup EXIT
 
 #####################################
 say -b "processing cmdline"
-CMDLINE=`getopt -o "h" --long help,partitions:,format:,lilo:,extlinux:,default-format:,ids: -n $0 -- "$@"`
+CMDLINE=`getopt -o "h" --long help,partpercents:,format:,lilo:,extlinux:,default-format:,ids: -n $0 -- "$@"`
 if [ $? -ne 0 ]; then
 	say " -> invocation error (invalid/incorrect cmdline)"
 	usage
@@ -431,7 +432,7 @@ while true; do
 			usage
 			exit 0
 			;;
-		--partitions)
+		--partpercents)
 			PARTITION_SIZES="$2"
 			shift
 			;;
