@@ -31,14 +31,10 @@ LOCATIONS, DEFINITIONS:
 
 CAVEATS:
 ^^^^^^^^
-   So far the script only supports building a VM for an x86-based machine.
-   Eventually I'd like to see it support other architectures, but for now
-   this is what I have.
-
    In this tutorial I indicate the specific versions of components I have used.
    You are free, of course, to use whatever versions you would like, but if
-   you would like to try using a know-to-work set of versions on your first
-   try it might be best to start with these versions then tweak as you want.
+   you would like to try using a known-to-work set of versions on your first
+   try it might be best to start with these versions then tweak afterwards.
 
    Notice that any steps that can be run as a regular user are prefixed with
    a '$' PS1, any which need to be run as root have a PS1 of '#'.
