@@ -739,7 +739,7 @@ if [ X"$UNITS" != X"sectors" ]; then
 	say "  -> can't get partition block sizes in sectors"
 	exit 1
 fi
-BLOCKSZ=(`fdisk $GEOM -lu $VMIMG | tail -${PARTITION_CNT} |  tr -s ' ' | cut -d' ' -f4 | cut -d'+' -f1`)
+BLOCKSZ=(`fdisk $GEOM -lu $VMIMG | tail -${PARTITION_CNT} | sed -e 's/^ *//' | tr -s ' ' | cut -d' ' -f4 | cut -d'+' -f1`)
 if [ ${#BLOCKSZ[*]} -ne ${PARTITION_CNT} ]; then
 	say "  -> can't get block sizes"
 	fdisk $GEOM -lu $VMIMG | tail -${PARTITION_CNT} >&6
@@ -758,7 +758,7 @@ echo ${BLOCKSZ[*]}
 #####################################
 ## figure out the start offsets (for losetup -o <OFFSET>)
 say -b "obtaining partition start offsets"
-OFFSETS=(`fdisk $GEOM -lu $VMIMG | tail -${PARTITION_CNT} | tr -s ' ' | cut -d' ' -f2`)
+OFFSETS=(`fdisk $GEOM -lu $VMIMG | tail -${PARTITION_CNT} | sed -e 's/^ *//' | tr -s ' ' | cut -d' ' -f2`)
 if [ ${#OFFSETS[*]} -ne $PARTITION_CNT ]; then
 	say "  -> can't get partition offsets"
 	fdisk $GEOM -lu $VMIMG | tail -${PARTITION_CNT} >&6
