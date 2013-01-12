@@ -107,7 +107,7 @@ STEPS:
    choice: lilo or extlinux. If you wish to use lilo:
 
 	# $PROJECT/mkqemuimg.sh \
-		--lilo $BUILD/conf/lilo.tmpl \
+		--lilo $PROJECT/conf/lilo.tmpl \
 		8388608 disk.HDD $BASE
 
    If you wish to use extlinux you need to first find out to location to which
