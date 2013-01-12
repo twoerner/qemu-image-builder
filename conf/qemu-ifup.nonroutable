@@ -4,4 +4,4 @@ echo "bringing up interface '$1'"
 
 # create interface and bring it up
 ifconfig $1 down
-ifconfig $1 192.168.0.1 up
+ifconfig $1 192.168.7.1 up

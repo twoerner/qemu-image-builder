@@ -36,6 +36,11 @@ CAVEATS:
    you would like to try using a known-to-work set of versions on your first
    try it might be best to start with these versions then tweak afterwards.
 
+   For my testing, I have use a base system of openSuSE 12.2. These
+   instructions assume you have installed the tools necessary for compiling C
+   programs. Additionally you may find that you need some non-standard packages
+   installed such as 'glibc-devel-static' (which is used to link busybox).
+
    Notice that any steps that can be run as a regular user are prefixed with
    a '$' PS1, any which need to be run as root have a PS1 of '#'.
 
@@ -44,18 +49,18 @@ STEPS:
 1) Linux Kernel
 
    The first thing the filesystem will need (since it is the second thing to
-   be run by a booting system) is the Linux kernel. In this example I have used
-   2.6.39.3. Goto kernel.org, retrieve that version of the Linux kernel, and
-   unpack it in $BUILD (creating the directory $BUILD/linux-2.6.39.3):
+   be run by a booting system) is the Linux kernel. In this example I have
+   used 3.7.2. Goto kernel.org, retrieve that version of the Linux kernel, and
+   unpack it in $BUILD (creating the directory $BUILD/linux-3.7.2):
 
 	$ cd $BUILD
-	$ bzip2 -d < $DOWNLOAD/linux-2.6.39.3.tar.bz2 | tar xfv -
-	$ cd linux-2.6.39.3
+	$ bzip2 -d < $DOWNLOAD/linux-3.7.2.tar.bz2 | tar xfv -
+	$ cd linux-3.7.2
 
    You can configure the kernel any way you wish, but I have provided a very
    basic, simple configuration which will work well enough for this tutorial:
 
-	$ cp $PROJECT/conf/linux-2.6.39.3 .config
+	$ cp $PROJECT/conf/linux-3.7.2 .config
 	$ make bzImage
 
    NOTE that you may have to answer some additional configuration questions.
@@ -69,12 +74,12 @@ STEPS:
 2) Linux Userspace -- Busybox
 
    There are many available options, but the fastest and easiest for our
-   purposes is to use Busybox. In my testing I used version 1.18.5:
+   purposes is to use Busybox. In my testing I used version 1.20.2:
 
 	$ cd $BUILD
-	$ bzip2 -d < $DOWNLOAD/busybox-1.18.5.tar.bz2 | tar xfv -
-	$ cd busybox-1.18.5
-	$ cp $PROJECT/conf/busybox-1.18.5 .config
+	$ bzip2 -d < $DOWNLOAD/busybox-1.20.2.tar.bz2 | tar xfv -
+	$ cd busybox-1.20.2
+	$ cp $PROJECT/conf/busybox-1.20.2 .config
 	$ make
 	$ make CONFIG_PREFIX=$BASE install
 
@@ -82,22 +87,11 @@ STEPS:
 3) Linux Userspace -- Extras
 
    The $BASE directory is almost complete, but in order to finish the
-   filesystem a few more things are needed:
+   filesystem a few more things are needed. To help make this easy,
+   simply run the provided script:
 
-	$ cd $BASE
-	$ mkdir -p dev etc/init.d proc sys
-	$ cp $BUILD/busybox-1.18.5/examples/inittab etc
-	$ cat > etc/init.d/rcS << EOF
-	#!/bin/sh
-	mount -t sysfs sysfs /sys
-	mount -t proc proc /proc
-	ifconfig lo 127.0.0.1
-	ifconfig eth0 192.168.0.50
-	EOF
-	$ chmod +x etc/init.d/rcS
-
-   Edit 'etc/inittab' and remove (or comment out) any lines which have the
-   string "getty" in them.
+   	$ cd $BASE
+   	$ $PROJECT/fsfodder.sh
 
 
 4) Build HDD Image
@@ -134,6 +128,6 @@ STEPS:
 	# qemu-system-x86_64 \
 		-m 512 \
 		-drive file=disk.HDD \
-		-net nic,model=virtio \
-		-net tap,script=conf/qemu-ifup.nonroutable,downscript=no \
+		-net nic \
+		-net tap,script=$PROJECT/conf/qemu-ifup.nonroutable,downscript=no \
 		-no-reboot
